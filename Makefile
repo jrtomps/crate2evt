@@ -30,7 +30,9 @@ $(USERFILTER): $(OBJECTS)
 	$(CXX) $(OBJECTS) -o $@ $(USERLDFLAGS) $(LDFLAGS)
 
 
-
+clean : 
+	rm -f $(USERFILTER)
+	rm -f *.o
 
 
 

@@ -22,6 +22,7 @@ class Main
     std::string   input_file_path;
     std::string   libname;
     int           sourceId;
+    int           runNo;
     size_t        nToProcess;
     size_t        nToSkip;
     bool          verboseOutput;
@@ -41,6 +42,10 @@ class Main
     int  mainLoop();
 
     void setVerbose(bool onoff) { verboseOutput = onoff; }
+
+    void emitFormat(CRingBuffer* pRing);
+    void emitBeginRun(CRingBuffer* pRing);
+    void emitEndRun(CRingBuffer* pRing);
 
 };
 

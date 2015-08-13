@@ -6,6 +6,8 @@
 #include <CRawVMUSBtoRing.h>
 #include <ByteBuffer.h>
 #include <CRingBuffer.h>
+#include <CRingStateChangeItem.h>
+#include <CDataFormatItem.h>
 
 #include <cstdlib>
 #include <algorithm>
@@ -16,6 +18,7 @@
 #include <iomanip>
 #include <fstream>
 #include <limits>
+#include <chrono>
 
 namespace po = boost::program_options;
 
@@ -28,6 +31,7 @@ Main::Main()
   input_file_path(),
   libname(),
   sourceId(0),
+  runNo(0),
   nToProcess(std::numeric_limits<size_t>::max()),
   nToSkip(0),
   verboseOutput(false),
@@ -42,7 +46,8 @@ void Main::setUpCommandLineOptions() {
     ("input_file", po::value<string>(), "crate file to read data from")
     ("ring_name", po::value<string>()->default_value("out"), "name of ring buffer to output to")
     ("tstamplib", "path to timestamp extractor library")
-    ("id", "source id")
+    ("id", po::value<int>(), "source id")
+    ("run", po::value<int>(), "run")
     ("count", po::value<size_t>(), "number of buffers to process")
     ("skip", po::value<size_t>(), "number of buffers to skip")
     ("verbose", po::value<bool>(), "output debugging messages")
@@ -79,9 +84,11 @@ void Main::validateCommandLine()
     throw runtime_error("User must specify a tstamp lib file");
   }
 
-  int sourceId = 0;
   if (vm.count("id")) {
     sourceId = vm["id"].as<int>();
+  }
+  if (vm.count("run")) {
+    runNo = vm["run"].as<int>();
   }
   
   if (vm.count("dumpindex")) {
@@ -141,6 +148,8 @@ int Main::mainLoop()
   convertAndOutput.getTimestampExtractor();
   convertAndOutput.setOptionalHeader(true);
 
+  emitFormat(pRing);
+  emitBeginRun(pRing);
 
   size_t bufferCount = 0;
   while (bufferCount < nToSkip+nToProcess) {
@@ -195,5 +204,36 @@ int Main::mainLoop()
     ++bufferCount;
   }
 
+  emitEndRun(pRing);
+
   return 0;
+}
+
+
+void Main::emitFormat(CRingBuffer* pRing)
+{
+  CDataFormatItem format;
+  format.commitToRing(*pRing);
+}
+
+void Main::emitBeginRun(CRingBuffer* pRing)
+{
+  using namespace std::chrono;
+  CRingStateChangeItem begin(0, sourceId, BEGIN_RUN, BEGIN_RUN,
+      runNo,
+      0,
+      system_clock::to_time_t(system_clock::now()),
+      "this is a fabricated begin", 1);
+
+  begin.commitToRing(*pRing);
+}
+void Main::emitEndRun(CRingBuffer* pRing)
+{
+  using namespace std::chrono;
+  CRingStateChangeItem end(0, sourceId, END_RUN, END_RUN,
+      runNo,
+      1,
+      system_clock::to_time_t(system_clock::now()),
+      "this is a fabricated end", 1);
+  end.commitToRing(*pRing);
 }

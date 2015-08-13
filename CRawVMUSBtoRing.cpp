@@ -7,6 +7,7 @@
 #include <ErrnoException.h>
 #include <iostream>
 #include <cstring>
+#include <memory>
 #include <dlfcn.h>
 
 using namespace std;
@@ -28,9 +29,11 @@ static const unsigned MonitorStack(7);
 
 static const unsigned BUFFERS_BETWEEN_EVENTCOUNTS(64);  // max buffers before an event count item.
 
+using namespace DAQ::Buffer;
 
 CRawVMUSBtoRing::CRawVMUSBtoRing(CRingBuffer* pBuffer)
-  : m_pRing(pBuffer),
+  : m_nOutputBufferSize(8192),
+  m_pRing(pBuffer),
   m_scalerPeriod(1),
   m_pSclrTimestampExtractor(nullptr),
   m_pEvtTimestampExtractor(nullptr)
@@ -53,7 +56,7 @@ CRawVMUSBtoRing::CRawVMUSBtoRing(CRingBuffer* pBuffer)
   @param buffer  - The buffer from the readout thread.
 */
 void
-CRawVMUSBtoRing::processBuffer(std::vector<IOU16>& buffer)
+CRawVMUSBtoRing::processBuffer(ByteBuffer& buffer)
 {
   processEvents(buffer);
 }
@@ -81,77 +84,71 @@ bool CRawVMUSBtoRing::hasOptionalHeader()
  *
  * @param inBuffer  -  Reference to a raw input buffer.
  */
-static uint32_t  bufferNumber = 0; 
-  void 
-CRawVMUSBtoRing::processEvents(std::vector<IOU16>& inBuffer)
+void 
+CRawVMUSBtoRing::processEvents(ByteBuffer& inBuffer)
 {
-  IOU16* pContents = inBuffer.data();
-  int16_t  nEvents   = pContents->value & VMUSBNEventMask;
-  bool isScalerBuffer = ((0x4000&pContents->value)==0x4000);
+  Deserializer<ByteBuffer> buffer(inBuffer);
 
-  bufferNumber++;
+  uint16_t bufferHeader;
+  buffer >> bufferHeader;
 
-  pContents++;			// Point to first event.
-  ssize_t    nWords    = inBuffer.size() - 1; // Remaining words read.
+  int16_t  nEvents    = bufferHeader & VMUSBNEventMask;
+  bool isScalerBuffer = ((0x4000&bufferHeader)==0x4000);
+//  cout << "Header  : " << hex << bufferHeader << dec << endl;
+//  cout << "nEvents : " << hex << nEvents << dec << endl;
+
+  ssize_t  nWords    = inBuffer.size()/sizeof(uint16_t) - 2; // Remaining words read.
 
   // Check if the optional second header exists
   if (hasOptionalHeader()) {
-    uint16_t wordsInBuffer = pContents->value;  
-    ++pContents;
-    if (wordsInBuffer != nWords-1) {
-      // The words that are reported in the optional header do not count 
-      // the first buffer header word. The number is self inclusive though.
-      cerr << "VMUSB specifies " << wordsInBuffer << " in buffer, but ";
-      cerr << "the number of words read is in disagreement." ;
-    }
-    --nWords;
+    validateOptionalHeader(buffer, nWords);
   } 
 
-  while (nWords > 0) {
-    if (nEvents <= 0) {
-      // Next long should be 0xffffffff buffer terminator:
-      // I've seen this happen but it's not fatal...just go on to the next buffer.
-
-      uint32_t nextLong = pContents->value;
-      nextLong = ((pContents+1)->value << 16);
-      if (nextLong != 0xffffffff) {
-        cerr << "Ran out of events but did not see buffer terminator\n";
-        cerr << nWords << " remaining unprocessed\n";
-      }
-
-      break;			// trusting event count vs word count(?).
-    }
+  int16_t nTotalEvents = nEvents;
+  while (nEvents>0 && !buffer.eof()) {
 
     // Pull the event length and stack number from the header:
     // event length is not self inclusive and is in uint16_t units.
 
-    uint16_t header     = pContents->value;
+    uint16_t header = buffer.peek<uint16_t>();
     size_t   eventLength = header & VMUSBEventLengthMask;
     uint8_t  stackNum   = (header & VMUSBStackIdMask) >> VMUSBStackIdShift;
-
-    // Dispatch depending on the actual stack number.  The dispatch provided
-    // allows for multiple event stacks (e.g. interrupt triggered stacks
-    // that do different things).
+//    cout << "\nEvent # : " << nTotalEvents-nEvents 
+//         << " @ " << std::distance(buffer.begin(), buffer.pos()) << endl;
 
     if (isScalerBuffer) {
-      scaler(pContents);
+      scaler(buffer);
     }
     else {
-      event(pContents);
+      event(buffer);
     }
-    // Point at the next event and compute the remaining word and event counts.
 
-    pContents->value += eventLength + 1; // Event count is not self inclusive.
-    nWords    -= (eventLength + 1);
     nEvents--;
-  }
+  } // end processing loop
 
+  // CLEANUP WORK
+  //
+  if ( buffer.eof() ) {
+    cout << "NO EOB found!" << endl;
+  } else {
+    validateEndOfBuffer(buffer);
+  }
   // I've seen the VM-USB hand me a bogus event count...but never a bogus
   // buffer word count.  This is non fatal but reported.
-
-  if (nWords < 0) {
-    cerr << "Warning used up more than the buffer  by " << (-nWords) << endl;
+  if (buffer.pos() != buffer.end()) {
+    if (buffer.pos() < buffer.end()) {
+      cerr << "Warning failed to use up last " 
+        << std::distance(buffer.pos(), buffer.end()) << " bytes in buffer" << endl;
+      uint16_t value;
+      while ((buffer>> value)) {
+        cout << "\t\t" << hex << value << dec << endl;
+      }
+    } else {
+      cerr << "Warning used up more than the buffer by " 
+        << std::distance(buffer.end(), buffer.pos()) << endl;
+    }
   }
+
   m_nBuffersBeforeEventCount--;
   if (m_nBuffersBeforeEventCount == 0) {
 
@@ -163,6 +160,36 @@ CRawVMUSBtoRing::processEvents(std::vector<IOU16>& inBuffer)
 
     outputTriggerCount(now.tv_sec - m_startTimestamp.tv_sec);   // Figure out run offset.
     m_nBuffersBeforeEventCount = BUFFERS_BETWEEN_EVENTCOUNTS;
+  }
+
+}
+
+void CRawVMUSBtoRing::validateOptionalHeader(Deserializer<ByteBuffer>& buffer, size_t nWords)
+{
+    uint16_t wordsInBuffer;  
+    buffer >> wordsInBuffer;
+    if (wordsInBuffer != nWords) {
+      // The words that are reported in the optional header do not count 
+      // the first buffer header word. The number is self inclusive though.
+      cerr << "VMUSB specifies " << wordsInBuffer << " in buffer, but ";
+      cerr << "the number of words read (" << nWords << ") is in disagreement." ;
+    }
+}
+
+void CRawVMUSBtoRing::validateEndOfBuffer(Deserializer<ByteBuffer>& buffer)
+{
+  // Next long should be 0xffffffff buffer terminator:
+  // I've seen this happen but it's not fatal...just go on to the next buffer.
+
+  //  std::cout << "Checking EOB @ " << distance(buffer.begin(), buffer.pos()) << endl;
+  uint32_t nextLong;
+  buffer >> nextLong;
+  if (nextLong != 0xffffffff) {
+    cerr << "Ran out of events but did not see buffer terminator\n";
+    cerr << distance(buffer.pos(), buffer.end()) << " bytes remaining unprocessed\n";
+    cerr <<  "Observed instead 0x" << hex << nextLong << dec << endl;
+  } else {
+  //  cout << "FOUND" << endl;
   }
 }
 
@@ -196,20 +223,15 @@ CRawVMUSBtoRing::outputTriggerCount(uint32_t runOffset)
  * @throw std::string - From CRingBuffer if unable to commit the item to the ring.
  */
 void
-CRawVMUSBtoRing::scaler(IOU16* pData)
+CRawVMUSBtoRing::scaler(Deserializer<ByteBuffer>& buffer)
 {
 
-
-  time_t timestamp;
-  if (time(&timestamp) == -1) {
-    throw CErrnoException("CRawVMUSBtoRing::scaler unable to get the absolute timestamp");
-  }
+  cout << "scaler" << endl;
 
   // Figure out where the scalers are and fetch the event header.
 
-  IOU16* pHeader = pData;
-  uint16_t  header  = pHeader->value;
-  IOU16* pBody   = pHeader+1; // Pointer to the scalers.
+  uint16_t  header;
+  buffer >> header;
 
   // See Issue #424 - for now throw an error  if there's a continuation segment:
 
@@ -221,14 +243,7 @@ CRawVMUSBtoRing::scaler(IOU16* pData)
 
   // Marshall the scalers into an std::vector:
 
-  std::vector<uint32_t> counterData;
-  for (int i = 0; i < nScalers; i++) {
-    uint32_t value = pBody->value;
-    pBody++;
-    value          += (pBody->value) << 16;
-    pBody++;
-    counterData.push_back(value);
-  }
+  std::vector<uint32_t> counterData = extractScalerData(buffer, nScalers);
 
   // The VM-USB does not timestamp scaler data for us at this time so we
   // are going to rely on the scaler period to be correct:
@@ -241,45 +256,62 @@ CRawVMUSBtoRing::scaler(IOU16* pData)
   m_nBuffersBeforeEventCount = BUFFERS_BETWEEN_EVENTCOUNTS;
 
   // Create the final scaler item and submit it to the ring.
+  formAndOutputScalerItem(buffer, counterData, endTime);
 
-  CRingItem* pEvent;
+  m_elapsedSeconds = endTime;
+
+}
+
+vector<uint32_t> CRawVMUSBtoRing::extractScalerData(Deserializer<ByteBuffer>& buffer, size_t nScalers)
+{
+  vector<uint32_t> counters;
+  counters.reserve(nScalers);
+
+  for (size_t i = 0; i < nScalers; i++) {
+    uint32_t value;
+    buffer >> value;
+    counters.push_back(value);
+  }
+
+  return counters;
+}
+
+void CRawVMUSBtoRing::formAndOutputScalerItem(Deserializer<ByteBuffer>& buffer,
+                                              const vector<uint32_t>& counterData,
+                                              uint32_t endTime)
+{
+
+  time_t timestamp;
+  if (time(&timestamp) == -1) {
+    throw CErrnoException("CRawVMUSBtoRing::scaler unable to get the absolute timestamp");
+  }
+
+  unique_ptr<CRingItem> pEvent;
   if (m_pSclrTimestampExtractor) {
-    pEvent = new CRingScalerItem(m_pSclrTimestampExtractor(pData), 
+    void* pData = const_cast<void*>(
+                                    static_cast<const void*>(buffer.getContainer().data()
+                                    +std::distance(buffer.begin(),buffer.pos())
+                                              )
+                  );
+    pEvent.reset(new CRingScalerItem(m_pSclrTimestampExtractor(pData), 
                                  m_sourceId,
                                  0,
                                  m_elapsedSeconds, 
                                  endTime, 
                                  timestamp, 
                                  counterData,
-				 1, false);
+				 1, false));
   } else {
-    pEvent = new CRingScalerItem(m_elapsedSeconds, 
+    pEvent.reset(new CRingScalerItem(m_elapsedSeconds, 
                                  endTime, 
                                  timestamp, 
                                  counterData,
-				 false);
+				 false));
   }
 
   pEvent->commitToRing(*m_pRing);
-  m_elapsedSeconds = endTime;
-  delete pEvent;
 }
 
-
-
-/**
- * Create a new output buffer.
- * for now this is trivial
- *
- * @return uint8_t*
- * @retval Pointer to the output buffer.
- */
-uint8_t* 
-CRawVMUSBtoRing::newOutputBuffer()
-{
-  return reinterpret_cast<uint8_t*>(malloc(m_nOutputBufferSize));
-  
-}
 /**
  * Process a single event:
  * - If necessary create the event assembly buffer and initialize its
@@ -298,93 +330,72 @@ CRawVMUSBtoRing::newOutputBuffer()
  * @note The data go in in native VM-USB format.  That's what the SpecTcl disassembler expects.
  */
 void 
-CRawVMUSBtoRing::event(IOU16* pData)
+CRawVMUSBtoRing::event(Deserializer<ByteBuffer>& buffer)
 {
+//  cout << "event" << endl;
   // If necessary make an new output buffer
-
-  if (!m_pBuffer) {
-    m_pBuffer        = newOutputBuffer();
-    m_pCursor        = m_pBuffer;
-    m_nWordsInBuffer = 0;	  
-  }
 
   // Initialize the pointers to event bits and pieces.
 
-  IOU16* pSegment = pData;
-  uint16_t  header   = pSegment->value;
+  uint16_t  header = buffer.peek<uint16_t>();
+//  cout << "\theader : " << hex << header << " (" << dec << header << ")" << endl;
+//  cout << "\tpos    : " << std::distance(buffer.begin(), buffer.pos()) << endl;
 
-  // Figure out the header:
- 
-  size_t segmentSize = header & VMUSBEventLengthMask;
-  bool   haveMore    = (header & VMUSBContinuation) != 0;
+  size_t shortsInSegment = (header & VMUSBEventLengthMask) + 1;
   
-  // Events must currently fit in the buffer...otherwise we throw an error.
-
-  segmentSize += 1;		// Size is not self inclusive
-
-  if ((segmentSize + m_nWordsInBuffer) >= m_nOutputBufferSize/sizeof(uint16_t)) {
-    int newSize          = 2*segmentSize*sizeof(uint16_t);
-    uint8_t* pNewBuffer = reinterpret_cast<uint8_t*>(realloc(m_pBuffer, m_nOutputBufferSize+newSize));
-    if (pNewBuffer) {
-      m_pBuffer            = pNewBuffer;
-      m_pCursor            = m_pBuffer + m_nWordsInBuffer * sizeof(uint16_t);
-      m_nOutputBufferSize += newSize;
-
-    } else {
-      throw std::string("Failed to resize event buffer to fit an oversized segment");
-    }
-
-
+  // allocate more memory if necessary
+  size_t bytesInSegment = shortsInSegment*sizeof(uint16_t);
+  if ((m_buffer.size() + bytesInSegment)  > m_buffer.capacity()) {
+    m_buffer.reserve(m_buffer.size() + 2*bytesInSegment);
   }
-  // Next we can copy our data to the output buffer and update the cursor
-  // remembering that the size is not self inclusive:
-  //
-  memcpy(m_pCursor, pData, segmentSize*sizeof(uint16_t));
-  m_nWordsInBuffer += segmentSize;
-  m_pCursor += segmentSize*sizeof(uint16_t); // advance the cursor
 
-  
+  auto endCopy = buffer.pos()+bytesInSegment;
+  m_buffer.insert(m_buffer.end(), buffer.pos(), endCopy);
+  buffer.setPosition(endCopy);
+//  cout << "\t# bytes = " << bytesInSegment << endl;
 
-  // If that was the last segment submit it and reset cursors and counters.
+  if (eventComplete(header)) {			    // Ending segment:
 
-  if (!haveMore) {			    // Ending segment:
-    //
-    // IF we were given a timestamp extractor we create an event with full
-    // body header.
-    
-    CRingItem* pEvent;
-    if (m_pEvtTimestampExtractor) {
-        pEvent = new CRingItem(
-            PHYSICS_EVENT, m_pEvtTimestampExtractor(m_pBuffer), m_sourceId,
-            0, m_nWordsInBuffer*sizeof(uint16_t) + 100
-        );        
-    } else {
-        pEvent = new CRingItem(
-            PHYSICS_EVENT, m_nWordsInBuffer*sizeof(uint16_t) + 100
-        ); // +100 really needed?
-    }
-
-    CRingItem& event(*pEvent);
-    // Put the data in the event and figure out where the end pointer is.
-
-    void* pDest = event.getBodyPointer();
-    memcpy(pDest, m_pBuffer, m_nWordsInBuffer*sizeof(uint16_t));
-    uint8_t* pEnd = reinterpret_cast<uint8_t*>(pDest);
-    pEnd += m_nWordsInBuffer*sizeof(uint16_t); // Where the new body cursor goes.
-
-    event.setBodyCursor(pEnd);
-    event.updateSize();
-    event.commitToRing(*m_pRing);
-    delete pEvent;
+    formAndOutputPhysicsEventItem();
     // Reset the cursor and word count in the assembly buffer:
 
-    m_nWordsInBuffer = 0;
-    m_pCursor        = m_pBuffer;
-    
+    m_buffer.clear();
     m_nEventsSeen++;
   }
 
 }
+
+bool CRawVMUSBtoRing::eventComplete(uint16_t header)
+{
+  return (header & VMUSBContinuation) == 0;
+}
+
+void CRawVMUSBtoRing::formAndOutputPhysicsEventItem()
+{
+    unique_ptr<CRingItem> pEvent;
+
+    if (m_pEvtTimestampExtractor) {
+      pEvent.reset(new CRingItem(PHYSICS_EVENT, 
+                                 m_pEvtTimestampExtractor(m_buffer.data()), m_sourceId,
+                                 0, m_buffer.size() + 100));        
+    } else {
+      pEvent.reset(new CRingItem(PHYSICS_EVENT, m_buffer.size() + 100)); // +100 really needed?
+    }
+
+    CRingItem& event(*pEvent);
+    fillBodyWithData(event, m_buffer);
+}
+
+void CRawVMUSBtoRing::fillBodyWithData(CRingItem& event, const std::vector<uint8_t>& data)
+{
+    uint8_t* pDest = reinterpret_cast<uint8_t*>(event.getBodyPointer());
+    uint8_t* pEnd = std::copy(data.begin(), data.end(), pDest);
+
+    event.setBodyCursor(pEnd);
+    event.updateSize();
+    event.commitToRing(*m_pRing);
+}
+
 /**
  * getTimestampExtractor
  *    Fills in m_pTimestampExtractor if this should be non-null

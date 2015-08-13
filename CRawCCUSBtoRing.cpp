@@ -21,12 +21,12 @@ CRawCCUSBtoRing::validateEndOfBuffer(Deserializer<ByteBuffer>& buffer)
   // I've seen this happen but it's not fatal...just go on to the next buffer.
 
   //  std::cout << "Checking EOB @ " << distance(buffer.begin(), buffer.pos()) << endl;
-  uint32_t nextLong;
-  buffer >> nextLong;
-  if (nextLong != 0xffffffff) {
+  uint16_t nextShort;
+  buffer >> nextShort;
+  if (nextShort != 0xffff) {
     cerr << "Ran out of events but did not see buffer terminator\n";
     cerr << distance(buffer.pos(), buffer.end()) << " bytes remaining unprocessed\n";
-    cerr <<  "Observed instead 0x" << hex << nextLong << dec << endl;
+    cerr <<  "Observed instead 0x" << hex << nextShort << dec << endl;
   } else {
     //  cout << "FOUND" << endl;
   }

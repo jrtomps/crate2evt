@@ -13,7 +13,7 @@ USERLDFLAGS=-L$(INSTDIR)/lib -lDataFlow -ldataformat -lException -Wl,-rpath=$(IN
 #  Add the names of objects you need here if you modified the name of the driver file, 
 #  this should also reflect thtat.
 #
-OBJECTS = main.o Main.o CRawVMUSBtoRing.o ByteOrder.o
+OBJECTS = main.o Main.o CRawXXUSBtoRing.o CRawVMUSBtoRing.o CRawCCUSBtoRing.o ByteOrder.o
 
 #
 #  Modify the line below to provide the name of the library you are trying to build

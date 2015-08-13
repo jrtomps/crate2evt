@@ -1,5 +1,5 @@
 
-#include <CRawVMUSBtoRing.h>
+#include <CRawCCUSBtoRing.h>
 #include <CRingItem.h>
 #include <CRingScalerItem.h>
 #include <CRingPhysicsEventCountItem.h>
@@ -10,12 +10,12 @@
 using namespace std;
 using namespace DAQ::Buffer;
 
-CRawVMUSBtoRing::CRawVMUSBtoRing(CRingBuffer* pRing)
+CRawCCUSBtoRing::CRawCCUSBtoRing(CRingBuffer* pRing)
   : CRawXXUSBtoRing(pRing) {}
 
 
   void 
-CRawVMUSBtoRing::validateEndOfBuffer(Deserializer<ByteBuffer>& buffer)
+CRawCCUSBtoRing::validateEndOfBuffer(Deserializer<ByteBuffer>& buffer)
 {
   // Next long should be 0xffffffff buffer terminator:
   // I've seen this happen but it's not fatal...just go on to the next buffer.
@@ -33,7 +33,7 @@ CRawVMUSBtoRing::validateEndOfBuffer(Deserializer<ByteBuffer>& buffer)
 }
 
   std::vector<uint32_t> 
-  CRawVMUSBtoRing::extractScalerData(Deserializer<ByteBuffer>& buffer,
+  CRawCCUSBtoRing::extractScalerData(Deserializer<ByteBuffer>& buffer,
       size_t nScalers)
 {
   vector<uint32_t> counters;
@@ -48,7 +48,7 @@ CRawVMUSBtoRing::validateEndOfBuffer(Deserializer<ByteBuffer>& buffer)
   return counters;
 }
 
-void CRawVMUSBtoRing::formAndOutputScalerItem(Deserializer<ByteBuffer>& buffer, 
+void CRawCCUSBtoRing::formAndOutputScalerItem(Deserializer<ByteBuffer>& buffer, 
     const std::vector<uint32_t>& scalers,
     uint32_t endTime)
 {
@@ -84,7 +84,7 @@ void CRawVMUSBtoRing::formAndOutputScalerItem(Deserializer<ByteBuffer>& buffer,
 }
 
 
-void CRawVMUSBtoRing::formAndOutputPhysicsEventItem()
+void CRawCCUSBtoRing::formAndOutputPhysicsEventItem()
 {
     unique_ptr<CRingItem> pEvent;
 

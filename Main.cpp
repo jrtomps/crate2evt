@@ -3,7 +3,9 @@
 
 #include <Main.h>
 #include <IOU16.h>
+#include <CRawXXUSBtoRing.h>
 #include <CRawVMUSBtoRing.h>
+#include <CRawCCUSBtoRing.h>
 #include <ByteBuffer.h>
 #include <CRingBuffer.h>
 #include <CRingStateChangeItem.h>
@@ -35,7 +37,8 @@ Main::Main()
   nToProcess(std::numeric_limits<size_t>::max()),
   nToSkip(0),
   verboseOutput(false),
-  index(std::numeric_limits<size_t>::max())
+  index(std::numeric_limits<size_t>::max()),
+  isVMUSB(true)
 {
   setUpCommandLineOptions();
 }
@@ -51,6 +54,7 @@ void Main::setUpCommandLineOptions() {
     ("count", po::value<size_t>(), "number of buffers to process")
     ("skip", po::value<size_t>(), "number of buffers to skip")
     ("verbose", po::value<bool>(), "output debugging messages")
+    ("type", po::value<string>(), "vmusb or ccusb")
     ("dumpindex", po::value<size_t>()->default_value(0), "index of buffer to dump to file");
 }
 
@@ -102,6 +106,14 @@ void Main::validateCommandLine()
   if (vm.count("skip")) {
     nToSkip = vm["skip"].as<size_t>();
   }
+
+  if (vm.count("type")) {
+    if (vm["type"].as<string>() == "vmusb") { 
+      isVMUSB = true;
+    }
+  } else {
+    throw runtime_error("User must specify a type as ccusb or vmusb");
+  }
 }
 
 
@@ -142,7 +154,13 @@ int Main::mainLoop()
     return 1;
   }
 
-  CRawVMUSBtoRing convertAndOutput(pRing);
+  unique_ptr<CRawXXUSBtoRing> pConverter;
+  if (isVMUSB) {
+    pConverter.reset(new CRawVMUSBtoRing(pRing));
+  } else {
+    pConverter.reset(new CRawCCUSBtoRing(pRing));
+  }
+  CRawXXUSBtoRing& convertAndOutput(*pConverter);
   convertAndOutput.setSourceId(sourceId);
   convertAndOutput.setTimestampExtractorLib(libname);
   convertAndOutput.getTimestampExtractor();

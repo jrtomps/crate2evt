@@ -27,6 +27,7 @@ class Main
     size_t        nToSkip;
     bool          verboseOutput;
     size_t        index;
+    bool          isVMUSB;
 
 
   public:

@@ -1,13 +1,13 @@
 
-#ifndef CRAWVMUSBTORING_H
-#define CRAWVMUSBTORING_H
+#ifndef CRAWCCUSBTORING_H
+#define CRAWCCUSBTORING_H
 
 #include "CRawXXUSBtoRing.h"
 
-class CRawVMUSBtoRing : public CRawXXUSBtoRing
+class CRawCCUSBtoRing : public CRawXXUSBtoRing
 {
   public:
-    CRawVMUSBtoRing(CRingBuffer* pRing);
+    CRawCCUSBtoRing(CRingBuffer* pRing);
 
     virtual void 
       validateEndOfBuffer(DAQ::Buffer::Deserializer<DAQ::Buffer::ByteBuffer>& buffer);

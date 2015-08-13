@@ -30,6 +30,7 @@ Main::Main()
   sourceId(0),
   nToProcess(std::numeric_limits<size_t>::max()),
   nToSkip(0),
+  verboseOutput(false),
   index(std::numeric_limits<size_t>::max())
 {
   setUpCommandLineOptions();
@@ -162,14 +163,18 @@ int Main::mainLoop()
       break;
     }
 
-    size_t bytesInBuffer = (optHeader.value+2)*sizeof(uint16_t);
+    // header specifies size of buffer, there are two more 
+    // EOB words
+    size_t nEOBWords = 2;
+    size_t bytesInBuffer = (optHeader.value+nEOBWords)*sizeof(uint16_t);
     DAQ::Buffer::ByteBuffer buffer;
     buffer.reserve(bytesInBuffer);
     buffer << bufHeader.value;
     buffer << optHeader.value;
     buffer.resize(bytesInBuffer);
     
-    stream.read(reinterpret_cast<char*>(buffer.data()+2*sizeof(uint16_t)), buffer.size()-2*sizeof(uint16_t));
+    stream.read(reinterpret_cast<char*>(buffer.data()+2*sizeof(uint16_t)),
+                buffer.size()-nEOBWords*sizeof(uint16_t));
 
     if (bufferCount == index) {
       std::ofstream dbgFile("debug", ios::binary);
@@ -182,7 +187,7 @@ int Main::mainLoop()
         cout << "Header  : 0x" << hex << bufHeader.value << dec << endl;
         cout << "OptHdr  : "   << optHeader.value << endl;
         cout << "Begin @ : "   << bufStartPos << endl;
-        cout << "Nbytes  : "   << bytesInBuffer + 2*sizeof(uint16_t) << endl;
+        cout << "Nbytes  : "   << bytesInBuffer + nEOBWords*sizeof(uint16_t) << endl;
       }
       convertAndOutput.processBuffer( buffer );
     }

@@ -40,6 +40,8 @@ class Main
     void validateCommandLine();
     int  mainLoop();
 
+    void setVerbose(bool onoff) { verboseOutput = onoff; }
+
 };
 
 #endif

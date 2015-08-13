@@ -1,1 +1,5 @@
 *.cra
+*.o
+*.so
+crate2ring
+debug

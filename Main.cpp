@@ -48,7 +48,7 @@ void Main::setUpCommandLineOptions() {
     ("help", "display this help message")
     ("input_file", po::value<string>(), "crate file to read data from")
     ("ring_name", po::value<string>()->default_value("out"), "name of ring buffer to output to")
-    ("tstamplib", "path to timestamp extractor library")
+    ("tstamplib", po::value<string>(), "path to timestamp extractor library")
     ("id", po::value<int>(), "source id")
     ("run", po::value<int>(), "run")
     ("count", po::value<size_t>(), "number of buffers to process")
@@ -178,6 +178,7 @@ int Main::mainLoop()
 
   size_t bufferCount = 0;
   size_t nTotalToProcess = 0;
+  // make sure we don't incur addition overflow
   if (nToProcess==std::numeric_limits<size_t>::max()) {
     nTotalToProcess = nToProcess;
   }

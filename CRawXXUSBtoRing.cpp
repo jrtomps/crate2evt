@@ -319,7 +319,11 @@ bool CRawXXUSBtoRing::eventComplete(uint16_t header)
   return (header & VMUSBContinuation) == 0;
 }
 
-void CRawXXUSBtoRing::fillBodyWithData(CRingItem& event, const std::vector<uint8_t>& data)
+
+
+//////
+void CRawXXUSBtoRing::fillBodyWithData(CRingItem& event, 
+                                       const std::vector<uint8_t>& data)
 {
     uint8_t* pDest = reinterpret_cast<uint8_t*>(event.getBodyPointer());
     uint8_t* pEnd = std::copy(data.begin(), data.end(), pDest);
@@ -329,9 +333,10 @@ void CRawXXUSBtoRing::fillBodyWithData(CRingItem& event, const std::vector<uint8
     event.commitToRing(*m_pRing);
 }
 
-  std::vector<uint32_t> 
-  CRawXXUSBtoRing::extractScalerData(Deserializer<ByteBuffer>& buffer,
-      size_t nWords)
+//
+std::vector<uint32_t> 
+CRawXXUSBtoRing::extractScalerData(Deserializer<ByteBuffer>& buffer,
+                                   size_t nWords)
 {
   size_t        nShortsPerLong = sizeof(uint32_t)/sizeof(uint16_t);
   size_t        nScalers =  nWords/nShortsPerLong;
@@ -346,6 +351,9 @@ void CRawXXUSBtoRing::fillBodyWithData(CRingItem& event, const std::vector<uint8
     counters.push_back(value);
   }
   
+  // if the number of words did not evenly divide by 4, we need to handle
+  // the leftover word. I do so with bytes. They just get shoved in the
+  // lowest bytes of another 32-bit word.
   union IOU32 {
     uint32_t value;
     char     bytes[sizeof(uint32_t)];
@@ -368,9 +376,11 @@ void CRawXXUSBtoRing::fillBodyWithData(CRingItem& event, const std::vector<uint8
   return counters;
 }
 
+
+//
 void CRawXXUSBtoRing::formAndOutputScalerItem(Deserializer<ByteBuffer>& buffer, 
-    const std::vector<uint32_t>& scalers,
-    uint32_t endTime)
+                                              const std::vector<uint32_t>& scalers,
+                                              uint32_t endTime)
 {
   time_t timestamp;
   if (time(&timestamp) == -1) {
@@ -404,6 +414,7 @@ void CRawXXUSBtoRing::formAndOutputScalerItem(Deserializer<ByteBuffer>& buffer,
 }
 
 
+//
 void CRawXXUSBtoRing::formAndOutputPhysicsEventItem()
 {
     unique_ptr<CRingItem> pEvent;

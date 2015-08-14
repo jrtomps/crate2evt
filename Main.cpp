@@ -53,7 +53,7 @@ void Main::setUpCommandLineOptions() {
     ("run", po::value<int>(), "run")
     ("count", po::value<size_t>(), "number of buffers to process")
     ("skip", po::value<size_t>(), "number of buffers to skip")
-    ("verbose", po::value<bool>(), "output debugging messages")
+    ("verbose", po::value<int>(), "output debugging messages (0=off, 1=on)")
     ("type", po::value<string>(), "vmusb or ccusb")
     ("dumpindex", po::value<size_t>()->default_value(0), "index of buffer to dump to file");
 }
@@ -107,9 +107,15 @@ void Main::validateCommandLine()
     nToSkip = vm["skip"].as<size_t>();
   }
 
+  if (vm.count("verbose")) {
+    verboseOutput = (vm["verbose"].as<int>()==1);
+  }
+
   if (vm.count("type")) {
     if (vm["type"].as<string>() == "vmusb") { 
       isVMUSB = true;
+    } else { 
+      isVMUSB = false;
     }
   } else {
     throw runtime_error("User must specify a type as ccusb or vmusb");
@@ -165,12 +171,18 @@ int Main::mainLoop()
   convertAndOutput.setTimestampExtractorLib(libname);
   convertAndOutput.getTimestampExtractor();
   convertAndOutput.setOptionalHeader(true);
+  convertAndOutput.setVerbose(verboseOutput);
 
   emitFormat(pRing);
   emitBeginRun(pRing);
 
   size_t bufferCount = 0;
-  while (bufferCount < nToSkip+nToProcess) {
+  size_t nTotalToProcess = 0;
+  if (nToProcess==std::numeric_limits<size_t>::max()) {
+    nTotalToProcess = nToProcess;
+  }
+
+  while (bufferCount < nTotalToProcess) {
 
     IOU16 bufHeader, optHeader;
     auto bufStartPos = stream.tellg();
@@ -212,7 +224,8 @@ int Main::mainLoop()
       if (verboseOutput) {
         cout << "Buffer information" << endl;
         cout << "Header  : 0x" << hex << bufHeader.value << dec << endl;
-        cout << "OptHdr  : "   << optHeader.value << endl;
+        cout << "OptHdr  : 0x" << hex << optHeader.value 
+                               << "  (" << dec << optHeader.value << ")" << endl;
         cout << "Begin @ : "   << bufStartPos << endl;
         cout << "Nbytes  : "   << bytesInBuffer + nEOBWords*sizeof(uint16_t) << endl;
       }
@@ -224,6 +237,8 @@ int Main::mainLoop()
 
   emitEndRun(pRing);
 
+  cout << "Observed  : " << bufferCount << " buffers" << endl;
+  cout << "Processed : " << bufferCount-nToSkip  << " buffers" << endl;
   return 0;
 }
 

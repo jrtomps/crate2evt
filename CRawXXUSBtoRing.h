@@ -34,6 +34,7 @@ class CRawXXUSBtoRing
   std::string m_tstampExtractorLib;
   TimestampExtractor m_pEvtTimestampExtractor;
   TimestampExtractor m_pSclrTimestampExtractor;
+  bool        m_verbose;
 
   public:
   CRawXXUSBtoRing(CRingBuffer* pRingBuffer);
@@ -60,16 +61,18 @@ class CRawXXUSBtoRing
 
   virtual std::vector<uint32_t> 
     extractScalerData(DAQ::Buffer::Deserializer<DAQ::Buffer::ByteBuffer>& buffer,
-                      size_t nScalers) = 0;
+                      size_t nWords);
   virtual void 
     formAndOutputScalerItem(DAQ::Buffer::Deserializer<DAQ::Buffer::ByteBuffer>& buffer, 
                                const std::vector<uint32_t>& scalers,
-                               uint32_t endTime) = 0;
+                               uint32_t endTime);
   virtual void 
-    formAndOutputPhysicsEventItem() = 0;
+    formAndOutputPhysicsEventItem();
   void fillBodyWithData(CRingItem& event, const std::vector<uint8_t>& data);
 
   bool eventComplete(uint16_t header);
+
+  void setVerbose(bool onoff) { m_verbose = onoff; }
 };
 
 #endif

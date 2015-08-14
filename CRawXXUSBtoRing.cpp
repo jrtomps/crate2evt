@@ -94,8 +94,10 @@ CRawXXUSBtoRing::processEvents(ByteBuffer& inBuffer)
 
   int16_t  nEvents    = bufferHeader & VMUSBNEventMask;
   bool isScalerBuffer = ((0x4000&bufferHeader)==0x4000);
-//  cout << "Header  : " << hex << bufferHeader << dec << endl;
-//  cout << "nEvents : " << hex << nEvents << dec << endl;
+  if (m_verbose) {
+    cout << "Header  : 0x" << hex << bufferHeader << dec << endl;
+    cout << "nEvents : " << nEvents << endl;
+  }
 
   ssize_t  nWords    = inBuffer.size()/sizeof(uint16_t) - 2; // Remaining words read.
 
@@ -113,8 +115,10 @@ CRawXXUSBtoRing::processEvents(ByteBuffer& inBuffer)
     uint16_t header = buffer.peek<uint16_t>();
     size_t   eventLength = header & VMUSBEventLengthMask;
     uint8_t  stackNum   = (header & VMUSBStackIdMask) >> VMUSBStackIdShift;
-//    cout << "\nEvent # : " << nTotalEvents-nEvents 
-//         << " @ " << std::distance(buffer.begin(), buffer.pos()) << endl;
+    if (m_verbose) {
+      cout << "\nEvent # : " << nTotalEvents-nEvents 
+           << " @ " << std::distance(buffer.begin(), buffer.pos()) << endl;
+    }
 
     if (isScalerBuffer) {
       scaler(buffer);
@@ -210,24 +214,27 @@ void
 CRawXXUSBtoRing::scaler(Deserializer<ByteBuffer>& buffer)
 {
 
-  cout << "scaler" << endl;
+  if (m_verbose) {
+    cout << "scaler" << endl;
+  }
 
   // Figure out where the scalers are and fetch the event header.
 
   uint16_t  header;
   buffer >> header;
 
-  // See Issue #424 - for now throw an error  if there's a continuation segment:
-
-
   // Figure out how many wods/scalers there are:
 
   size_t        nWords   =  header & VMUSBEventLengthMask;
-  size_t        nScalers =  nWords/(sizeof(uint32_t)/sizeof(uint16_t));
 
+  if (m_verbose) {
+    cout << "\theader : 0x" << hex << header << " (" << dec << header << ")" << endl;
+    cout << "\tpos    : " << std::distance(buffer.begin(), buffer.pos()) << endl;
+    cout << "\tnWords : " << nWords << endl;
+  }
   // Marshall the scalers into an std::vector:
 
-  std::vector<uint32_t> counterData = extractScalerData(buffer, nScalers);
+  std::vector<uint32_t> counterData = extractScalerData(buffer, nWords);
 
   // The VM-USB does not timestamp scaler data for us at this time so we
   // are going to rely on the scaler period to be correct:
@@ -268,14 +275,18 @@ CRawXXUSBtoRing::scaler(Deserializer<ByteBuffer>& buffer)
 void 
 CRawXXUSBtoRing::event(Deserializer<ByteBuffer>& buffer)
 {
-//  cout << "event" << endl;
+  if (m_verbose) {
+    cout << "event" << endl;
+  }
   // If necessary make an new output buffer
 
   // Initialize the pointers to event bits and pieces.
 
   uint16_t  header = buffer.peek<uint16_t>();
-//  cout << "\theader : " << hex << header << " (" << dec << header << ")" << endl;
-//  cout << "\tpos    : " << std::distance(buffer.begin(), buffer.pos()) << endl;
+  if (m_verbose) {
+    cout << "\theader : 0x" << hex << header << " (" << dec << header << ")" << endl;
+    cout << "\tpos    : " << std::distance(buffer.begin(), buffer.pos()) << endl;
+  }
 
   size_t shortsInSegment = (header & VMUSBEventLengthMask) + 1;
   
@@ -288,7 +299,9 @@ CRawXXUSBtoRing::event(Deserializer<ByteBuffer>& buffer)
   auto endCopy = buffer.pos()+bytesInSegment;
   m_buffer.insert(m_buffer.end(), buffer.pos(), endCopy);
   buffer.setPosition(endCopy);
-//  cout << "\t# bytes = " << bytesInSegment << endl;
+  if (m_verbose) {
+    cout << "\t# bytes = " << bytesInSegment << endl;
+  }
 
   if (eventComplete(header)) {			    // Ending segment:
 
@@ -315,6 +328,98 @@ void CRawXXUSBtoRing::fillBodyWithData(CRingItem& event, const std::vector<uint8
     event.updateSize();
     event.commitToRing(*m_pRing);
 }
+
+  std::vector<uint32_t> 
+  CRawXXUSBtoRing::extractScalerData(Deserializer<ByteBuffer>& buffer,
+      size_t nWords)
+{
+  size_t        nShortsPerLong = sizeof(uint32_t)/sizeof(uint16_t);
+  size_t        nScalers =  nWords/nShortsPerLong;
+  size_t        nLeftOverBytes = (nWords % nShortsPerLong)*sizeof(uint16_t);
+
+  vector<uint32_t> counters;
+  counters.reserve(nScalers);
+
+  for (size_t i = 0; i < nScalers; i++) {
+    uint32_t value;
+    buffer >> value;
+    counters.push_back(value);
+  }
+  
+  union IOU32 {
+    uint32_t value;
+    char     bytes[sizeof(uint32_t)];
+  } slopBytes;
+
+  if (nLeftOverBytes != 0) {
+
+    slopBytes.value = 0;
+
+    for (size_t i=0; i<nLeftOverBytes; ++i) {
+      uint8_t value;
+      buffer >> value;
+      slopBytes.bytes[i] = value;
+    }
+
+    counters.push_back(slopBytes.value);
+  }
+
+
+  return counters;
+}
+
+void CRawXXUSBtoRing::formAndOutputScalerItem(Deserializer<ByteBuffer>& buffer, 
+    const std::vector<uint32_t>& scalers,
+    uint32_t endTime)
+{
+  time_t timestamp;
+  if (time(&timestamp) == -1) {
+    throw CErrnoException("CRawXXUSBtoRing::scaler unable to get the absolute timestamp");
+  }
+
+  unique_ptr<CRingItem> pEvent;
+  if (m_pSclrTimestampExtractor) {
+    void* pData = const_cast<void*>(
+                                    static_cast<const void*>(buffer.getContainer().data()
+                                    +std::distance(buffer.begin(),buffer.pos())
+                                              )
+                  );
+    pEvent.reset(new CRingScalerItem(m_pSclrTimestampExtractor(pData), 
+                                 m_sourceId,
+                                 0,
+                                 m_elapsedSeconds, 
+                                 endTime, 
+                                 timestamp, 
+                                 scalers,
+				 1, false));
+  } else {
+    pEvent.reset(new CRingScalerItem(m_elapsedSeconds, 
+                                 endTime, 
+                                 timestamp, 
+                                 scalers,
+				 false));
+  }
+
+  pEvent->commitToRing(*m_pRing);
+}
+
+
+void CRawXXUSBtoRing::formAndOutputPhysicsEventItem()
+{
+    unique_ptr<CRingItem> pEvent;
+
+    if (m_pEvtTimestampExtractor) {
+      pEvent.reset(new CRingItem(PHYSICS_EVENT, 
+                                 m_pEvtTimestampExtractor(m_buffer.data()), m_sourceId,
+                                 0, m_buffer.size() + 100));        
+    } else {
+      pEvent.reset(new CRingItem(PHYSICS_EVENT, m_buffer.size() + 100)); 
+    }
+
+    CRingItem& event(*pEvent);
+    fillBodyWithData(event, m_buffer);
+}
+
 
 /**
  * getTimestampExtractor

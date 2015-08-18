@@ -29,6 +29,11 @@ CRawCCUSBtoRing::validateEndOfBuffer(Deserializer<ByteBuffer>& buffer)
   }
 }
 
+bool CRawCCUSBtoRing::isScalerData(uint16_t bufHdr, uint16_t evtHdr)
+{
+  return ((0x4000&bufHdr)==0x4000);
+}
+
 //  std::vector<uint32_t> 
 //  CRawCCUSBtoRing::extractScalerData(Deserializer<ByteBuffer>& buffer,
 //      size_t nScalers)

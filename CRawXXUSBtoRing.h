@@ -66,6 +66,9 @@ class CRawXXUSBtoRing
     formAndOutputScalerItem(DAQ::Buffer::Deserializer<DAQ::Buffer::ByteBuffer>& buffer, 
                                const std::vector<uint32_t>& scalers,
                                uint32_t endTime);
+
+  virtual bool isScalerData(uint16_t bufferHeader, uint16_t evtHeader) = 0;
+
   virtual void 
     formAndOutputPhysicsEventItem();
   void fillBodyWithData(CRingItem& event, const std::vector<uint8_t>& data);

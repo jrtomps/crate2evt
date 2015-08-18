@@ -93,7 +93,6 @@ CRawXXUSBtoRing::processEvents(ByteBuffer& inBuffer)
   buffer >> bufferHeader;
 
   int16_t  nEvents    = bufferHeader & VMUSBNEventMask;
-  bool isScalerBuffer = ((0x4000&bufferHeader)==0x4000);
   if (m_verbose) {
     cout << "Header  : 0x" << hex << bufferHeader << dec << endl;
     cout << "nEvents : " << nEvents << endl;
@@ -120,7 +119,7 @@ CRawXXUSBtoRing::processEvents(ByteBuffer& inBuffer)
            << " @ " << std::distance(buffer.begin(), buffer.pos()) << endl;
     }
 
-    if (isScalerBuffer) {
+    if ( isScalerData(bufferHeader, header) ) {
       scaler(buffer);
     }
     else {

@@ -12,6 +12,7 @@ class CRawVMUSBtoRing : public CRawXXUSBtoRing
     virtual void 
       validateEndOfBuffer(DAQ::Buffer::Deserializer<DAQ::Buffer::ByteBuffer>& buffer);
 
+    virtual bool isScalerData(uint16_t bufHdr, uint16_t evtHdr);
 //    virtual std::vector<uint32_t> 
 //      extractScalerData(DAQ::Buffer::Deserializer<DAQ::Buffer::ByteBuffer>& buffer,
 //          size_t nScalers);
